@@ -431,7 +431,7 @@ class TicTacToe < Game
       elsif @turn == @compturn
         puts "\n-----------------------"
         puts "The computer will now make a move."
-        move = getCompMove("data_tictactoe.csv", @state)
+        move = getCompMove("data_tictactoe_RL.csv", @state)
         makeMove(move, @state)
         puts "The computer plays "+move.to_s+"."
       end

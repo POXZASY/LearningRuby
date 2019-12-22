@@ -6,8 +6,8 @@ EPSILON = 0.1
 
 def main
   t = TicTacToe.new
-  #t.playGame
+  t.playGame
   #t.trainAI_random(NUM_GAMES)
-  t.trainAI_RL(NUM_GAMES, EPSILON, ALPHA)
+  #t.trainAI_RL(NUM_GAMES, EPSILON, ALPHA)
 end
 main
