@@ -62,7 +62,28 @@ class TicTacToe < Game
     end
     return true
   end
-
+  #returns an array of possible moves, 1 to 9
+  def possibleMoves(position)
+    moves = []
+    for x in 0..2
+      for y in 0..2
+        if position[x][y]==0
+          moves << 3*x + y + 1 #board labeled 1 - 9
+        end
+      end
+    end
+    return moves
+  end
+  #input is state in array form
+  #returns a hash of the possible new states in string form, which map to their corresponding moves (1-9)
+  def possibleStates(currentstate)
+    states = {}
+    for p in possibleMoves(currentstate)
+      newstate = makeMove(p, currentstate, false)
+      states[stateToString(newstate)] = p
+    end
+    return states
+  end
   #checks if game is over, returns winner if true, returns -1 if tie, returns 0 if false
   def gameOver(position)
     #horizontal rows
@@ -105,6 +126,18 @@ class TicTacToe < Game
     end
     return retVal
   end
+  #converts 9-char string to state
+  def stringToState(position)
+    state = Array.new(3) {Array.new(3,0)}
+    count = 0
+    for x in 0..2
+      for y in 0..2
+        state[x][y] = position[count].to_i
+        count+=1
+      end
+    end
+    return state
+  end
   #expected value
   def getExpectedValue(turn, p1num, p2num, drawnum)
     total = p1num+p2num+drawnum
@@ -115,7 +148,8 @@ class TicTacToe < Game
     end
   end
   #returns the computers sugguested move
-  def getCompMove(filename, position)
+  #random parameter is for original implementation
+  def getCompMove(filename, position, random = false)
     #iterate through each of the possible moves, making a new position string for each
     #get the effective value of each new position
     #update best_move to the position with the best effective value
@@ -131,7 +165,15 @@ class TicTacToe < Game
     #try to find the positions in the database, update their effective score
     CSV.foreach(filename) do |row|
       if new_positions.key?(row[0])
-        ev = getExpectedValue(@turn, row[1].to_i, row[2].to_i, row[3].to_i)
+        if random
+          ev = getExpectedValue(@turn, row[1].to_i, row[2].to_i, row[3].to_i)
+        else
+          if @turn == 1
+            ev = row[1].to_f
+          elsif @turn == 2
+            ev = 1-(row[1].to_f)
+          end
+        end
         if ev >= best_move_effective_score
           best_move_effective_score = ev
           best_move = new_positions[row[0]]
@@ -145,20 +187,32 @@ class TicTacToe < Game
     end
   end
   #takes a hash of states and their p1/p2/draw values and stores in a .csv file
-  def createCSVFromStates(states, filename, numgames)
+  #random parameter for original random AI implementation
+  def createCSVFromStates(states, filename, numgames, random=false)
     CSV.open(filename, "wb"){ |f|
       #initialize the file
       f << ["total_games", numgames.to_s]
-      f << ["state", "p1_wins", "p2_wins", "draws"]
+      if random
+        f << ["state", "p1_wins", "p2_wins", "draws"]
+      else
+        f << ["state", "p1_win_prob"]
+      end
+
       #iterate through each state in the hash, adding it to the data file
       states.each do |key, value|
-        f << [key, value[0], value[1], value[2]]
+        if random
+          f << [key, value[0], value[1], value[2]]
+        else
+          f << [key, value]
+        end
       end
     }
   end
-  #train the AI
-  def trainAI(numgames)
-    @mode = "TRAINING"
+  #train the AI (my naive / first approach)
+  #makes random moves during self-play, records number of wins for p1/p2/draw for each position
+  #when playing against this ai, it merely selects the position with the greatest # of wins for that player
+  def trainAI_random(numgames)
+    @mode = "TRAINING_RANDOM"
     #hash of states, with p1/p2/draw vals
     statehash = {}
     for i in 1..numgames
@@ -210,11 +264,130 @@ class TicTacToe < Game
     end
 
     filename = "data_tictactoe"
-    createCSVFromStates(statehash, filename+".csv", numgames)
+    createCSVFromStates(statehash, filename+".csv", numgames, true)
     #save current data file as a backup with date and time as name marker
     FileUtils.cp(filename+".csv", "backups")
     time = Time.new
     FileUtils.mv("backups/"+filename+".csv", "backups/"+filename+"_"+(time.inspect.delete(':'))+".csv")
+  end
+  #training with primitive reinforcement learning
+  #records positions, intitializing prob of p1 winning for each position to .5 unless a win or lose position
+  #updates probabilities through self-play with temporal-difference learning
+  #epsilon parameter is the probablity exploration is chosen over greed
+  #alpha parameter is the update magnitude in temporal-difference i.e. V(S_t)=V(S_t)+a[V(S_t+1)-V(S_t)]
+  #first few pages of http://www.andrew.cmu.edu/course/10-703/textbook/BartoSutton.pdf
+  def trainAI_RL(numgames, epsilon, alpha)
+    @mode = "TRAINING_RL"
+    #hash of states with key/value position(str)/prob of p1 win pairs
+    statehash = {}
+    for i in 1..numgames
+      #reset state/turn to default
+      @state = Array.new(3) {Array.new(3, 0)}
+      @turn = 1
+      #smaller hash of the positions and probabilities this game
+      stateprobs = {}
+      #list of positions that came from being explored
+      exploredpositions = []
+      #play through a game, update the probabilities for each state at the end of the game
+      while true
+        #get the possible states / move pairs for this turn
+        posstates = possibleStates(@state)
+        #puts posstates.keys
+        #determine exploration or exploitation for this turn
+        randval = rand
+        #explore with random move, add to stateprobs
+        if rand <= epsilon
+          newpos = posstates.keys.shuffle.first
+          if statehash.key?(newpos)
+            stateprobs[newpos]=statehash[newpos]
+          else
+            gval = gameOver(stringToState(newpos))
+            #prob p1 win is 1
+            if gval==1
+              stateprobs[newpos]=1
+            #prob p1 win is 0
+            elsif gval==2
+              stateprobs[newpos]=0
+            #unfinished game or draw
+            else
+              stateprobs[newpos]=0.5
+            end
+          end
+          exploredpositions << newpos
+        #exploit with move of greatest probability, add to stateprobs
+        else
+          newpos = ""
+          probmax = 0.0
+          probmin = 1.0
+          #iterate through each possible state
+          #find the one with the greatest/least (depending on player) probability of p1 winning (new is .5 or 0/1 for a win)
+          for s, m in posstates #state (string), move
+
+            #get the current probability for the given position
+            if statehash.key?(s)
+              currentprob = statehash[s]
+            else
+              gval = gameOver(stringToState(s))
+              if gval == 1
+                currentprob = 1
+              elsif gval == 2
+                currentprob = 0
+              else
+                currentprob = 0.5
+              end
+            end
+
+            #update if the current probability is better than the previous best
+            if @turn == 1
+              if currentprob >= probmax
+                probmax = currentprob
+                newpos = s
+              end
+            elsif @turn == 2
+              if currentprob <= probmin
+                probmin = currentprob
+                newpos = s
+              end
+            end
+          end
+          if @turn == 1
+            stateprobs[newpos] = probmax
+          elsif @turn == 2
+            stateprobs[newpos] = probmin
+          end
+        end
+        #do the turn
+        makeMove(posstates[newpos], @state)
+        #check if game is over
+        if gameOver(@state)!=0
+          #update probs
+          for j in 0..stateprobs.size-2
+            poslow = stateprobs.keys.reverse[j] #lower in the tree, updater
+            poshigh = stateprobs.keys.reverse[j+1] #higher in the tree, updatee
+            if !(exploredpositions.include?(poslow)) #updater must not be an experimental position
+              stateprobs[poshigh] = stateprobs[poshigh] + alpha*(stateprobs[poslow]-stateprobs[poshigh])
+            end
+          end
+          break
+        end
+        @turn = (@turn%2)+1
+      end
+      #add the updated probabilities to the overall hash
+      for p in stateprobs.keys
+        statehash[p] = stateprobs[p]
+      end
+      if(i%10000==0)
+        puts "Game "+i.to_s+" complete."
+      end
+    end
+
+    filename = "data_tictactoe_RL"
+    backup_folder = "backups_RL"
+    createCSVFromStates(statehash, filename+".csv", numgames)
+    #save current data file as a backup with date and time as name marker
+    FileUtils.cp(filename+".csv", backup_folder)
+    time = Time.new
+    FileUtils.mv(backup_folder+"/"+filename+".csv", backup_folder+"/"+filename+"_"+(time.inspect.delete(':'))+".csv")
   end
   #perform a turn
   def doTurn
@@ -262,23 +435,12 @@ class TicTacToe < Game
         makeMove(move, @state)
         puts "The computer plays "+move.to_s+"."
       end
-    elsif @mode == "TRAINING"
+    elsif @mode == "TRAINING_RANDOM"
       move = getRandomMove(@state)
       makeMove(move, @state)
+    elsif @mode == "TRAINING_RL"
+      puts "This is a placeholder option, and may be unused."
     end
-  end
-
-  #returns an array of possible moves, 0 to 9
-  def possibleMoves(position)
-    moves = []
-    for x in 0..2
-      for y in 0..2
-        if position[x][y]==0
-          moves << 3*x + y + 1 #board labeled 1 - 9
-        end
-      end
-    end
-    return moves
   end
   #updates the state with a new move
   #does not check if move is illegal
