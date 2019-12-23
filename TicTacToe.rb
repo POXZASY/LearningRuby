@@ -148,8 +148,7 @@ class TicTacToe < Game
     end
   end
   #returns the computers sugguested move
-  #random parameter is for original implementation
-  def getCompMove(filename, position, random = false)
+  def getCompMove(filename, position)
     #iterate through each of the possible moves, making a new position string for each
     #get the effective value of each new position
     #update best_move to the position with the best effective value
@@ -165,14 +164,10 @@ class TicTacToe < Game
     #try to find the positions in the database, update their effective score
     CSV.foreach(filename) do |row|
       if new_positions.key?(row[0])
-        if random
-          ev = getExpectedValue(@turn, row[1].to_i, row[2].to_i, row[3].to_i)
-        else
-          if @turn == 1
-            ev = row[1].to_f
-          elsif @turn == 2
-            ev = 1-(row[1].to_f)
-          end
+        if @turn == 1
+          ev = row[1].to_f
+        elsif @turn == 2
+          ev = 1-(row[1].to_f)
         end
         if ev >= best_move_effective_score
           best_move_effective_score = ev
@@ -187,88 +182,16 @@ class TicTacToe < Game
     end
   end
   #takes a hash of states and their p1/p2/draw values and stores in a .csv file
-  #random parameter for original random AI implementation
-  def createCSVFromStates(states, filename, numgames, random=false)
+  def createCSVFromStates(states, filename, numgames)
     CSV.open(filename, "wb"){ |f|
       #initialize the file
       f << ["total_games", numgames.to_s]
-      if random
-        f << ["state", "p1_wins", "p2_wins", "draws"]
-      else
-        f << ["state", "p1_win_prob"]
-      end
-
+      f << ["state", "p1_win_prob"]
       #iterate through each state in the hash, adding it to the data file
       states.each do |key, value|
-        if random
-          f << [key, value[0], value[1], value[2]]
-        else
-          f << [key, value]
-        end
+        f << [key, value]
       end
     }
-  end
-  #train the AI (my naive / first approach)
-  #makes random moves during self-play, records number of wins for p1/p2/draw for each position
-  #when playing against this ai, it merely selects the position with the greatest # of wins for that player
-  def trainAI_random(numgames)
-    @mode = "TRAINING_RANDOM"
-    #hash of states, with p1/p2/draw vals
-    statehash = {}
-    for i in 1..numgames
-      #reset state/turn to default
-      @state = Array.new(3) {Array.new(3, 0)}
-      @turn = 1
-      #array to hold all gamestates, in string form
-      states = []
-      #play through a game, record all states, update with who won after game over
-      #loop through turns
-      while true
-        #do the turn
-        doTurn
-        #add the current state to the list of states for this game
-        states << stateToString(@state)
-        #check if game is over
-        if gameOver(@state)!=0
-          break
-        #change turn
-        end
-        @turn = (@turn%2)+1
-      end
-      winner = gameOver(@state)
-      #add all the states to the database, update with p1win, p2win, draw
-      states.each{ |s|
-        #if state is already in hash
-        if statehash.key?(s)
-          if winner == 1
-            statehash[s] = [statehash[s][0]+1, statehash[s][1], statehash[s][2]]
-          elsif winner == 2
-            statehash[s] = [statehash[s][0], statehash[s][1]+1, statehash[s][2]]
-          elsif winner < 0
-            statehash[s] = [statehash[s][0], statehash[s][1], statehash[s][2]+1]
-          end
-        #if state is not in hash
-        else
-          if winner == 1
-            statehash[s]=[1,0,0]
-          elsif winner == 2
-            statehash[s]=[0,1,0]
-          elsif winner < 0
-            statehash[s]=[0,0,1]
-          end
-        end
-      }
-      if i%1000 == 0
-        puts "Game "+i.to_s+" complete."
-      end
-    end
-
-    filename = "data_tictactoe"
-    createCSVFromStates(statehash, filename+".csv", numgames, true)
-    #save current data file as a backup with date and time as name marker
-    FileUtils.cp(filename+".csv", "backups")
-    time = Time.new
-    FileUtils.mv("backups/"+filename+".csv", "backups/"+filename+"_"+(time.inspect.delete(':'))+".csv")
   end
   #training with primitive reinforcement learning
   #records positions, intitializing prob of p1 winning for each position to .5 unless a win or lose position
@@ -435,9 +358,6 @@ class TicTacToe < Game
         makeMove(move, @state)
         puts "The computer plays "+move.to_s+"."
       end
-    elsif @mode == "TRAINING_RANDOM"
-      move = getRandomMove(@state)
-      makeMove(move, @state)
     elsif @mode == "TRAINING_RL"
       puts "This is a placeholder option, and may be unused."
     end
